@@ -1,6 +1,7 @@
 package me.semoro.spygame
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Canvas
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -39,6 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -263,6 +269,7 @@ private fun SetupScreen(
         ) {
             var categoriesExpanded by remember { mutableStateOf(false) }
             val totalWords = selectedCategories.sumOf { wordSets[it]?.size ?: 0 }
+            val categoriesRotation by animateFloatAsState(if (categoriesExpanded) 180f else 0f)
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -279,11 +286,20 @@ private fun SetupScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Text(
-                        text = "${selectedCategories.size}/${wordSets.size} · $totalWords слов  ${if (categoriesExpanded) "▲" else "▼"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "${selectedCategories.size}/${wordSets.size} · $totalWords слов",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        ChevronIcon(
+                            modifier = Modifier.size(20.dp).rotate(categoriesRotation),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 AnimatedVisibility(visible = categoriesExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -312,37 +328,70 @@ private fun SetupScreen(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+        if (shouldShowSocialExperiments()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
             ) {
-                Text(
-                    text = "Социальные эксперименты",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                SwitchRow(
-                    title = "Случайное слово для каждого",
-                    subtitle = "У каждого игрока своё слово",
-                    checked = randomWords,
-                    onCheckedChange = onRandomWordsChange
-                )
-                SwitchRow(
-                    title = "Двойной агент",
-                    subtitle = "Знает слово, но играет за шпионов",
-                    checked = doubleAgentEnabled,
-                    onCheckedChange = onDoubleAgentEnabledChange
-                )
-                SwitchRow(
-                    title = "Простак",
-                    subtitle = "Получает другое слово, не зная об этом",
-                    checked = foolEnabled,
-                    onCheckedChange = onFoolEnabledChange
-                )
+                var experimentsExpanded by remember { mutableStateOf(false) }
+                val experimentsRotation by animateFloatAsState(if (experimentsExpanded) 180f else 0f)
+                val activeCount = listOf(randomWords, doubleAgentEnabled, foolEnabled).count { it }
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { experimentsExpanded = !experimentsExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Социальные эксперименты",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (activeCount > 0) {
+                                Text(
+                                    text = "$activeCount вкл.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            ChevronIcon(
+                                modifier = Modifier.size(20.dp).rotate(experimentsRotation),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    AnimatedVisibility(visible = experimentsExpanded) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SwitchRow(
+                                title = "Случайное слово для каждого",
+                                subtitle = "У каждого игрока своё слово",
+                                checked = randomWords,
+                                onCheckedChange = onRandomWordsChange
+                            )
+                            SwitchRow(
+                                title = "Двойной агент",
+                                subtitle = "Знает слово, но играет за шпионов",
+                                checked = doubleAgentEnabled,
+                                onCheckedChange = onDoubleAgentEnabledChange
+                            )
+                            SwitchRow(
+                                title = "Простак",
+                                subtitle = "Получает другое слово, не зная об этом",
+                                checked = foolEnabled,
+                                onCheckedChange = onFoolEnabledChange
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -421,6 +470,26 @@ private fun CounterCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChevronIcon(
+    modifier: Modifier = Modifier,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = size.minDimension * 0.15f
+        val path = Path().apply {
+            moveTo(size.width * 0.25f, size.height * 0.35f)
+            lineTo(size.width * 0.5f, size.height * 0.65f)
+            lineTo(size.width * 0.75f, size.height * 0.35f)
+        }
+        drawPath(
+            path = path,
+            color = tint,
+            style = Stroke(width = strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        )
     }
 }
 
