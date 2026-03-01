@@ -28,6 +28,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,13 +42,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import spygame.composeapp.generated.resources.Res
 
 @OptIn(ExperimentalResourceApi::class)
-private suspend fun loadWords(): List<String> {
-    val bytes = Res.readBytes("files/words.txt")
-    return bytes.decodeToString().lines().filter { it.isNotBlank() }
+private suspend fun loadWordSets(): Map<String, List<String>> {
+    val bytes = Res.readBytes("files/words.json")
+    val jsonObject = Json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+    return jsonObject.mapValues { (_, value) ->
+        value.jsonArray.map { it.jsonPrimitive.content }
+    }
 }
 
 private enum class GameScreen {
@@ -57,41 +65,66 @@ private enum class GameScreen {
 @Composable
 fun App() {
     MaterialTheme {
-        var words by remember { mutableStateOf<List<String>>(emptyList()) }
+        var wordSets by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
 
         LaunchedEffect(Unit) {
-            words = loadWords()
+            wordSets = loadWordSets()
         }
 
         var screen by remember { mutableStateOf(GameScreen.SETUP) }
         var playerCount by remember { mutableStateOf(4) }
         var spyCount by remember { mutableStateOf(1) }
+        var selectedCategories by remember { mutableStateOf(setOf<String>()) }
+        var randomWords by remember { mutableStateOf(false) }
         var currentPlayerIndex by remember { mutableStateOf(0) }
         var spyIndices by remember { mutableStateOf(setOf<Int>()) }
-        var currentWord by remember { mutableStateOf("") }
+        var playerWordMap by remember { mutableStateOf(mapOf<Int, String>()) }
+
+        // Select all categories once words are loaded
+        if (selectedCategories.isEmpty() && wordSets.isNotEmpty()) {
+            selectedCategories = wordSets.keys.toSet()
+        }
 
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            if (words.isEmpty()) {
+            if (wordSets.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             } else {
                 when (screen) {
                     GameScreen.SETUP -> SetupScreen(
+                        wordSets = wordSets,
                         playerCount = playerCount,
                         spyCount = spyCount,
+                        selectedCategories = selectedCategories,
+                        randomWords = randomWords,
                         onPlayerCountChange = {
                             playerCount = it
                             spyCount = spyCount.coerceAtMost(it)
                         },
                         onSpyCountChange = { spyCount = it.coerceIn(0, playerCount) },
+                        onToggleCategory = { category ->
+                            selectedCategories = if (category in selectedCategories) {
+                                if (selectedCategories.size > 1) selectedCategories - category
+                                else selectedCategories
+                            } else {
+                                selectedCategories + category
+                            }
+                        },
+                        onRandomWordsChange = { randomWords = it },
                         onStartGame = {
-                            currentWord = words.random()
+                            val words = selectedCategories.flatMap { wordSets[it].orEmpty() }
                             spyIndices =
                                 (0 until playerCount).toList().shuffled().take(spyCount).toSet()
+                            if (randomWords) {
+                                playerWordMap = (0 until playerCount).associateWith { words.random() }
+                            } else {
+                                val word = words.random()
+                                playerWordMap = (0 until playerCount).associateWith { word }
+                            }
                             currentPlayerIndex = 0
                             screen = GameScreen.PLAYER_READY
                         }
@@ -104,7 +137,7 @@ fun App() {
 
                     GameScreen.PLAYER_REVEAL -> PlayerRevealScreen(
                         isSpy = currentPlayerIndex in spyIndices,
-                        word = currentWord,
+                        word = playerWordMap[currentPlayerIndex].orEmpty(),
                         onNext = {
                             if (currentPlayerIndex + 1 < playerCount) {
                                 currentPlayerIndex++
@@ -116,12 +149,13 @@ fun App() {
                     )
 
                     GameScreen.GAME_ACTIVE -> GameActiveScreen(
-                        word = currentWord,
+                        word = playerWordMap.values.firstOrNull().orEmpty(),
+                        randomWords = randomWords,
                         onNewGame = {
                             screen = GameScreen.SETUP
                             currentPlayerIndex = 0
                             spyIndices = emptySet()
-                            currentWord = ""
+                            playerWordMap = emptyMap()
                         }
                     )
                 }
@@ -132,10 +166,15 @@ fun App() {
 
 @Composable
 private fun SetupScreen(
+    wordSets: Map<String, List<String>>,
     playerCount: Int,
     spyCount: Int,
+    selectedCategories: Set<String>,
+    randomWords: Boolean,
     onPlayerCountChange: (Int) -> Unit,
     onSpyCountChange: (Int) -> Unit,
+    onToggleCategory: (String) -> Unit,
+    onRandomWordsChange: (Boolean) -> Unit,
     onStartGame: () -> Unit
 ) {
     Column(
@@ -172,6 +211,72 @@ private fun SetupScreen(
             max = playerCount,
             onCountChange = onSpyCountChange
         )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "\u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u0438 \u0441\u043B\u043E\u0432",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                wordSets.forEach { (category, words) ->
+                    val isSelected = category in selectedCategories
+                    if (isSelected) {
+                        Button(
+                            onClick = { onToggleCategory(category) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("$category (${words.size})")
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onToggleCategory(category) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("$category (${words.size})")
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "\u0421\u043E\u0446\u0438\u0430\u043B\u044C\u043D\u044B\u0439 \u044D\u043A\u0441\u043F\u0435\u0440\u0438\u043C\u0435\u043D\u0442",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "\u0421\u043B\u0443\u0447\u0430\u0439\u043D\u043E\u0435 \u0441\u043B\u043E\u0432\u043E \u0434\u043B\u044F \u043A\u0430\u0436\u0434\u043E\u0433\u043E",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = randomWords,
+                    onCheckedChange = onRandomWordsChange
+                )
+            }
+        }
 
         Spacer(Modifier.weight(1f))
 
@@ -364,6 +469,7 @@ private fun PlayerRevealScreen(
 @Composable
 private fun GameActiveScreen(
     word: String,
+    randomWords: Boolean,
     onNewGame: () -> Unit
 ) {
     var wordRevealed by remember { mutableStateOf(false) }
@@ -392,21 +498,23 @@ private fun GameActiveScreen(
 
             Spacer(Modifier.height(48.dp))
 
-            OutlinedButton(
-                onClick = { wordRevealed = !wordRevealed },
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-            ) {
-                Text(
-                    text = if (wordRevealed) "\u0421\u043B\u043E\u0432\u043E: $word" else "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u043B\u043E\u0432\u043E",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            if (!randomWords) {
+                OutlinedButton(
+                    onClick = { wordRevealed = !wordRevealed },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                ) {
+                    Text(
+                        text = if (wordRevealed) "\u0421\u043B\u043E\u0432\u043E: $word" else "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0441\u043B\u043E\u0432\u043E",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
-            Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
+            }
 
             Button(
                 onClick = onNewGame,
